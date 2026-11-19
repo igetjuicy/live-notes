@@ -398,8 +398,14 @@ const ua = navigator.userAgent;
 const isIOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const isMobile = isIOS || /Android|Mobi/.test(ua);
 const nativeWorks = !!SR && !navigator.brave && (isIOS || !/OPR\/|Opera|Firefox/.test(ua));
-if(isMobile){ $('model').value = 'onnx-community/whisper-tiny';
-  [...$('model').options].forEach(o => { if(!/tiny/.test(o.value)) o.disabled = true; }); }   // bigger models crash phones
+if(isMobile){   // phones/tablets: Tiny by default, bigger models allowed but marked
+  let saved = null; try { saved = JSON.parse(localStorage.getItem('live-notes-opts')); } catch(e){}
+  if(!saved || !saved.model) $('model').value = 'onnx-community/whisper-tiny';
+  [...$('model').options].forEach(o => {
+    if(/base/.test(o.value)) o.textContent = 'Base · better (may be slow)';
+    if(/small/.test(o.value)) o.textContent = 'Small · best (experimental, may crash)';
+  });
+}
 const pickEngine = () => { const e = $('engine').value; return e === 'auto' ? (nativeWorks ? 'live' : 'whisper') : e; };
 let on = false, engineNow = null;
 let recState = 'ready';
@@ -619,7 +625,11 @@ else if(!nativeWorks) status('ℹ️ This browser will use <b>Whisper</b>: speec
 // If the page died while loading Whisper last time, don't auto-load it again
 let crashedLastTime = false;
 try { crashedLastTime = localStorage.getItem('live-notes-wloading') === '1'; localStorage.removeItem('live-notes-wloading'); } catch(e){}
-if(crashedLastTime && pickEngine() === 'whisper') status('⚠️ The page closed while Whisper was loading last time (not enough memory?). Try the <b>Tiny</b> model, or use the Browser engine.', 'bad');
+if(crashedLastTime && pickEngine() === 'whisper'){
+  const wasBig = !/tiny/.test($('model').value);
+  if(wasBig){ $('model').value = 'onnx-community/whisper-tiny'; saveOpts(); }
+  status('⚠️ The page closed while Whisper was loading last time (not enough memory).' + (wasBig ? ' Switched back to <b>Tiny</b>.' : ' Try the Browser engine instead.'), 'bad');
+}
 // Start downloading Whisper as soon as the page opens (computers only)
 async function preloadWhisper(force){
   if(on) return;
