@@ -390,7 +390,8 @@ const ua = navigator.userAgent;
 const isIOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const isMobile = isIOS || /Android|Mobi/.test(ua);
 const nativeWorks = !!SR && !navigator.brave && (isIOS || !/OPR\/|Opera|Firefox/.test(ua));
-try { if(isMobile && !localStorage.getItem('live-notes-opts')) $('model').value = 'onnx-community/whisper-tiny'; } catch(e){}
+if(isMobile){ $('model').value = 'onnx-community/whisper-tiny';
+  [...$('model').options].forEach(o => { if(!/tiny/.test(o.value)) o.disabled = true; }); }   // bigger models crash phones
 const pickEngine = () => { const e = $('engine').value; return e === 'auto' ? (nativeWorks ? 'live' : 'whisper') : e; };
 let on = false, engineNow = null;
 let recState = 'ready';
@@ -526,7 +527,7 @@ function onWorkerMsg(d){
   if(d.type === 'progress'){ setRec('loading', d.pct); } if(d.type === 'progress') status(`⬇️ Downloading Whisper model (first time only)… ${d.pct != null ? Math.round(d.pct) + '%' : d.mb.toFixed(1) + ' MB'} <small>(${(d.file || '').split('/').pop()})</small>`, 'info');
   else if(d.type === 'stage'){ status('⏳ ' + d.msg, 'info'); setRec('loading'); }
   else if(d.type === 'alive'){}
-  else if(d.type === 'ready'){ workerReady = true; clearTimeout(loadTimer); loadedModel = $('model').value;
+  else if(d.type === 'ready'){ try { localStorage.removeItem('live-notes-wloading'); } catch(e){} workerReady = true; clearTimeout(loadTimer); loadedModel = $('model').value;
     if(on) status('🎙 Listening (Whisper' + (d.device === 'webgpu' ? ', GPU' : '') + ')… notes appear a few seconds after each sentence', 'ok');
     else status('✅ Whisper is ready. Press <b>● Record</b> to start.', 'ok');
     setRec('ready');
@@ -534,7 +535,7 @@ function onWorkerMsg(d){
   else if(d.type === 'text'){ busy = false; $('interim').textContent = '';
     const t = (d.text || '').trim(); const words = t.toLowerCase().split(/\s+/); const junk = words.length > 6 && new Set(words).size / words.length < 0.35;
     if(t && !BAD.test(t) && !junk) add(t, d.page, true); else if(on) $('interim').textContent = '(heard sound, but no words)'; next(); }
-  else if(d.type === 'error'){ busy = false; if(!workerReady){ loadingModel = ''; setRec('error'); } status('❌ Whisper error: ' + d.msg, 'bad'); next(); }
+  else if(d.type === 'error'){ try { localStorage.removeItem('live-notes-wloading'); } catch(e){} busy = false; if(!workerReady){ loadingModel = ''; setRec('error'); } status('❌ Whisper error: ' + d.msg, 'bad'); next(); }
 }
 const canCache = /^https?:$/.test(location.protocol) && 'caches' in window;   // Firefox can't cache for file:// pages
 let aliveTimer = null, usingMain = false;
@@ -569,6 +570,7 @@ async function startWhisper(){
 }
 let loadingModel = '';
 function loadModel(){ const m = $('model').value; if(loadingModel === m || !worker) return; loadingModel = m; workerReady = false;
+  try { localStorage.setItem('live-notes-wloading', '1'); } catch(e){}
   if(!usingMain){ clearTimeout(aliveTimer); aliveTimer = setTimeout(switchToMain, 5000); }   // worker silent → fall back
   worker.postMessage({type: 'load', model: m, cache: canCache}); }
 $('model').addEventListener('change', () => { workerReady = false; if(on && engineNow === 'whisper') loadModel(); });
@@ -605,9 +607,14 @@ function next(){
 
 if(!canCache && location.protocol === 'file:' && !nativeWorks) status('ℹ️ Opened as a file: Whisper works, but Firefox will re-download the model each time. Use the https link to download it only once.', 'info');
 else if(!nativeWorks) status('ℹ️ This browser will use <b>Whisper</b>: speech-to-text runs on your computer. The first time, it downloads a model (~80 MB).', 'info');
-// Start downloading Whisper as soon as the page opens (not when Record is pressed)
+// If the page died while loading Whisper last time, don't auto-load it again
+let crashedLastTime = false;
+try { crashedLastTime = localStorage.getItem('live-notes-wloading') === '1'; localStorage.removeItem('live-notes-wloading'); } catch(e){}
+if(crashedLastTime && pickEngine() === 'whisper') status('⚠️ The page closed while Whisper was loading last time (not enough memory?). Try the <b>Tiny</b> model, or use the Browser engine.', 'bad');
+// Start downloading Whisper as soon as the page opens (computers only)
 async function preloadWhisper(force){
   if(on) return;
+  if(!force && (isMobile || crashedLastTime)){ refreshRec(); return; }   // phones: only load Whisper when asked
   if(pickEngine() !== 'whisper' || (workerReady && loadedModel === $('model').value)) return refreshRec();
   if(!force && navigator.connection && navigator.connection.saveData){ setRec('needs'); return; }   // respect "data saver"
   setRec('loading'); status('⏳ Getting Whisper ready…', 'info');
