@@ -613,7 +613,8 @@ function next(){
   worker.postMessage(queue.shift());
 }
 
-if(!canCache && location.protocol === 'file:' && !nativeWorks) status('ℹ️ Opened as a file: Whisper works, but Firefox will re-download the model each time. Use the https link to download it only once.', 'info');
+if(isIOS && !SR && !crashedLastTime) status('📱 This browser has no built-in speech engine. For the best results on iPhone, open this link in <b>Safari</b>. (Whisper Tiny works here too, but it\'s slow and heavy on a phone.)', 'info');
+else if(!canCache && location.protocol === 'file:' && !nativeWorks) status('ℹ️ Opened as a file: Whisper works, but Firefox will re-download the model each time. Use the https link to download it only once.', 'info');
 else if(!nativeWorks) status('ℹ️ This browser will use <b>Whisper</b>: speech-to-text runs on your computer. The first time, it downloads a model (~80 MB).', 'info');
 // If the page died while loading Whisper last time, don't auto-load it again
 let crashedLastTime = false;
