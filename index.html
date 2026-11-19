@@ -21,6 +21,7 @@
   @keyframes p{50%{opacity:.3}}
   .sp{flex:1}
   #rec{background:var(--acc);color:#fff;border-color:var(--acc);font-weight:600} #rec.on{background:var(--rec);border-color:var(--rec)}
+  #rec.wait{background:var(--muted);border-color:var(--muted);cursor:progress}
   .meter{width:60px;height:8px;border-radius:4px;background:var(--line);overflow:hidden} .meter i{display:block;height:100%;width:0;background:#2fa84f;transition:width .08s}
   .wrap{flex:1;display:flex;min-height:0}
   .viewer{flex:1;display:flex;flex-direction:column;min-width:0}
@@ -392,6 +393,21 @@ const nativeWorks = !!SR && !navigator.brave && (isIOS || !/OPR\/|Opera|Firefox/
 try { if(isMobile && !localStorage.getItem('live-notes-opts')) $('model').value = 'onnx-community/whisper-tiny'; } catch(e){}
 const pickEngine = () => { const e = $('engine').value; return e === 'auto' ? (nativeWorks ? 'live' : 'whisper') : e; };
 let on = false, engineNow = null;
+let recState = 'ready';
+function setRec(state, pct){             // locks Record until Whisper is downloaded
+  if(on) return;
+  recState = state; const b = $('rec');
+  b.classList.toggle('wait', state === 'loading');
+  b.disabled = state === 'loading';
+  b.textContent = state === 'loading' ? '⏳ ' + (pct != null ? Math.round(pct) + '%' : 'Loading…')
+    : state === 'error' ? '↻ Retry download'
+    : state === 'needs' ? '⬇️ Get Whisper' : '● Record';
+}
+function refreshRec(){
+  if(on) return;
+  if(pickEngine() === 'whisper' && !(workerReady && loadedModel === $('model').value)) setRec(loadingModel === $('model').value ? 'loading' : 'needs');
+  else setRec('ready');
+}
 function setUI(rec){ $('rec').textContent = rec ? '■ Stop' : '● Record'; $('rec').classList.toggle('on', rec); $('dot').classList.toggle('on', rec); }
 
 async function start(){
@@ -417,8 +433,14 @@ function stop(keepMsg){
   stopMic();
   if(wake) try { wake.release(); } catch(e){} wake = null;
   if(!keepMsg) status('');
+  refreshRec();
 }
-$('rec').onclick = () => on ? stop() : start();
+$('rec').onclick = () => {
+  if(on) return stop();
+  if(recState === 'loading') return;
+  if(recState === 'needs' || recState === 'error'){ preloadWhisper(true); return; }
+  start();
+};
 $('lang').onchange = () => { if(on){ stop(); setTimeout(start, 300); } };
 $('engine').onchange = () => { if(on){ stop(); setTimeout(start, 300); } };
 
@@ -501,15 +523,18 @@ let chunk = [], chunkLen = 0, hasSpeech = false, silentMs = 0, chunkPage = null,
 const BAD = /^(\s*[\[\(].*[\]\)]\s*|\s*(thank you\.?|thanks for watching!?|you|altyazı m\.?k\.?|abone olmayı unutmayın\.?|\.+)\s*)$/i;
 
 function onWorkerMsg(d){
-  if(d.type === 'progress') status(`⬇️ Downloading Whisper model (first time only)… ${d.pct != null ? Math.round(d.pct) + '%' : d.mb.toFixed(1) + ' MB'} <small>(${(d.file || '').split('/').pop()})</small>`, 'info');
-  else if(d.type === 'stage') status('⏳ ' + d.msg, 'info');
+  if(d.type === 'progress'){ setRec('loading', d.pct); } if(d.type === 'progress') status(`⬇️ Downloading Whisper model (first time only)… ${d.pct != null ? Math.round(d.pct) + '%' : d.mb.toFixed(1) + ' MB'} <small>(${(d.file || '').split('/').pop()})</small>`, 'info');
+  else if(d.type === 'stage'){ status('⏳ ' + d.msg, 'info'); setRec('loading'); }
   else if(d.type === 'alive'){}
   else if(d.type === 'ready'){ workerReady = true; clearTimeout(loadTimer); loadedModel = $('model').value;
-    status('🎙 Listening (Whisper' + (d.device === 'webgpu' ? ', GPU' : '') + ')… notes appear a few seconds after each sentence', 'ok'); next(); }
+    if(on) status('🎙 Listening (Whisper' + (d.device === 'webgpu' ? ', GPU' : '') + ')… notes appear a few seconds after each sentence', 'ok');
+    else status('✅ Whisper is ready. Press <b>● Record</b> to start.', 'ok');
+    setRec('ready');
+    next(); }
   else if(d.type === 'text'){ busy = false; $('interim').textContent = '';
     const t = (d.text || '').trim(); const words = t.toLowerCase().split(/\s+/); const junk = words.length > 6 && new Set(words).size / words.length < 0.35;
     if(t && !BAD.test(t) && !junk) add(t, d.page, true); else if(on) $('interim').textContent = '(heard sound, but no words)'; next(); }
-  else if(d.type === 'error'){ busy = false; if(!workerReady) loadingModel = ''; status('❌ Whisper error: ' + d.msg, 'bad'); next(); }
+  else if(d.type === 'error'){ busy = false; if(!workerReady){ loadingModel = ''; setRec('error'); } status('❌ Whisper error: ' + d.msg, 'bad'); next(); }
 }
 const canCache = /^https?:$/.test(location.protocol) && 'caches' in window;   // Firefox can't cache for file:// pages
 let aliveTimer = null, usingMain = false;
@@ -529,7 +554,7 @@ function switchToMain(){            // background worker blocked (e.g. Firefox +
   try { worker && worker.terminate && worker.terminate(); } catch(e){}
   globalThis.__lnSend = d => onWorkerMsg(d);
   try { new Function($('workerSrc').textContent)(); }
-  catch(e){ status('❌ Couldn\'t start Whisper (' + (e.message || e) + ').', 'bad'); stop(true); return; }
+  catch(e){ status('❌ Couldn\'t start Whisper (' + (e.message || e) + ').', 'bad'); if(on) stop(true); return; }
   worker = { postMessage: d => globalThis.__lnHandle(d) };
   loadingModel = ''; loadModel();
 }
@@ -580,6 +605,17 @@ function next(){
 
 if(!canCache && location.protocol === 'file:' && !nativeWorks) status('ℹ️ Opened as a file: Whisper works, but Firefox will re-download the model each time. Use the https link to download it only once.', 'info');
 else if(!nativeWorks) status('ℹ️ This browser will use <b>Whisper</b>: speech-to-text runs on your computer. The first time, it downloads a model (~80 MB).', 'info');
+// Start downloading Whisper as soon as the page opens (not when Record is pressed)
+async function preloadWhisper(force){
+  if(on) return;
+  if(pickEngine() !== 'whisper' || (workerReady && loadedModel === $('model').value)) return refreshRec();
+  if(!force && navigator.connection && navigator.connection.saveData){ setRec('needs'); return; }   // respect "data saver"
+  setRec('loading'); status('⏳ Getting Whisper ready…', 'info');
+  await ensureWorker(); loadModel();
+}
+setTimeout(preloadWhisper, 800);
+$('engine').addEventListener('change', () => { if(!on) preloadWhisper(); });
+$('model').addEventListener('change', () => { if(!on) preloadWhisper(); });
 render();
 </script>
 </body>
