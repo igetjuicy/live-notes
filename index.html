@@ -181,6 +181,14 @@ if (typeof WorkerGlobalScope !== 'undefined') self.onmessage = e => handle(e.dat
 
 <script>
 const $ = id => document.getElementById(id);
+// Crash guard: if the last visit died while starting up, reset settings to safe defaults
+try {
+  if(localStorage.getItem('live-notes-booting') === '1'){
+    localStorage.removeItem('live-notes-opts'); localStorage.setItem('live-notes-wloading', '1');
+  }
+  localStorage.setItem('live-notes-booting', '1');
+  setTimeout(() => { try { localStorage.removeItem('live-notes-booting'); } catch(e){} }, 4000);
+} catch(e){}
 if(window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 /* ---------- state ---------- */
