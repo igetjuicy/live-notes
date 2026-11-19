@@ -126,6 +126,7 @@
     <div id="list"></div>
     <div class="interim" id="interim"></div>
     <div class="foot">
+      <label style="font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center"><input type="checkbox" id="fix" checked style="width:auto"> 🔤 Fix misheard words using the slide text</label>
       <input id="typed" placeholder="Type a note for this page & press Enter…">
       <div class="row"><button id="share" hidden>Share</button><button id="copy">Copy</button><button id="save">Save .txt</button><button id="clear">Clear</button></div>
     </div>
@@ -188,6 +189,8 @@ try { store = JSON.parse(localStorage.getItem('live-notes-v2')) || {}; } catch(e
 const notes = () => (store[docName] ||= []);
 const persist = () => { try { localStorage.setItem('live-notes-v2', JSON.stringify(store)); } catch(e) {} };
 const time = () => new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+try { const f = localStorage.getItem('live-notes-fix'); if(f !== null) $('fix').checked = f === '1'; } catch(e){}
+$('fix').onchange = () => { try { localStorage.setItem('live-notes-fix', $('fix').checked ? '1' : '0'); } catch(e){} };
 try { const s = JSON.parse(localStorage.getItem('live-notes-opts')); if(s){ $('engine').value = s.engine; $('model').value = s.model; $('lang').value = s.lang; } } catch(e) {}
 const saveOpts = () => { try { localStorage.setItem('live-notes-opts', JSON.stringify({engine: $('engine').value, model: $('model').value, lang: $('lang').value})); } catch(e) {} };
 ['engine','model','lang'].forEach(id => $(id).addEventListener('change', saveOpts));
@@ -205,6 +208,7 @@ async function loadFile(f){
   $('total').textContent = pdf.numPages;
   $('drop').hidden = true; $('cv').hidden = false;
   go(1);
+  buildVocab();
 }
 async function draw(){
   if(!pdf) return;
@@ -251,9 +255,86 @@ stage.ondragover = e => { e.preventDefault(); $('drop').classList.add('over'); }
 stage.ondragleave = () => $('drop').classList.remove('over');
 stage.ondrop = e => { e.preventDefault(); $('drop').classList.remove('over'); loadFile(e.dataTransfer.files[0]); };
 
+/* ---------- slide vocabulary: fixes misheard words ---------- */
+let vocab = {}, docVocab = new Map();
+const norm = w => w.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ı/g, 'i');
+async function buildVocab(){
+  vocab = {}; docVocab = new Map();
+  const doc = pdf;
+  for(let i = 1; i <= doc.numPages; i++){
+    try {
+      const tc = await (await doc.getPage(i)).getTextContent();
+      const words = tc.items.map(x => x.str).join(' ').match(/[\p{L}][\p{L}\p{N}'’-]{2,}/gu) || [];
+      const m = new Map();
+      for(const w of words){ const k = norm(w); if(!m.has(k)) m.set(k, w); if(!docVocab.has(k)) docVocab.set(k, w); }
+      vocab[i] = m;
+    } catch(e){}
+    if(doc !== pdf) return;   // another file was opened
+  }
+}
+function lev(a, b){
+  if(Math.abs(a.length - b.length) > 3) return 99;
+  const d = Array.from({length: b.length + 1}, (_, j) => j);
+  for(let i = 1; i <= a.length; i++){
+    let prev = d[0]; d[0] = i;
+    for(let j = 1; j <= b.length; j++){ const t = d[j]; d[j] = Math.min(d[j] + 1, d[j-1] + 1, prev + (a[i-1] === b[j-1] ? 0 : 1)); prev = t; }
+  }
+  return d[b.length];
+}
+function bestMatch(word, near){
+  const k = norm(word);
+  if(k.length < 4 || near.has(k) || docVocab.has(k)) return null;
+  const pick = (map, maxRatio) => {
+    let best = null, bd = 99;
+    for(const [key, orig] of map){
+      if(key[0] !== k[0] || key.length < 4) continue;
+      const d = lev(k, key);
+      if(d > 0 && d < bd && d / Math.max(k.length, key.length) <= maxRatio){ bd = d; best = orig; }
+    }
+    return best;
+  };
+  return pick(near, 0.34) || pick(docVocab, 0.2);
+}
+function fixText(text, p){
+  if(!$('fix').checked || !docVocab.size) return text;
+  const near = new Map([...(vocab[p-1] || []), ...(vocab[p+1] || []), ...(vocab[p] || [])]);
+  const parts = text.split(/\s+/).filter(Boolean).map(w => { const m = w.match(/^([^\p{L}\p{N}]*)(.*?)([^\p{L}\p{N}]*)$/u); return {pre: m[1], core: m[2], post: m[3]}; });
+  const out = [];
+  const upper = /^[A-ZÇĞİÖŞÜ]/;
+  const shape = (orig, rep) => /[A-Z]/.test(rep.slice(1)) ? rep                      // keep acronyms like mRNA / ATP
+    : (upper.test(orig) ? rep[0].toUpperCase() : rep[0].toLowerCase()) + rep.slice(1);  // otherwise follow the speaker's case
+  for(let i = 0; i < parts.length; i++){
+    const w = parts[i], n = parts[i+1];
+    const single = w.core.length >= 5 ? bestMatch(w.core, near) : null;
+    const singleD = single ? lev(norm(w.core), norm(single)) : 99;
+    if(n && w.core && n.core.length >= 3 && !w.post && !n.pre && !near.has(norm(w.core)) && !near.has(norm(n.core))){   // "mito chondria" → "mitochondria"
+      const merged = w.core + n.core, km = norm(merged);
+      let hit = near.get(km) || docVocab.get(km), d = hit ? 0 : 99;
+      if(!hit && merged.length >= 7){ const b = bestMatch(merged, near); if(b){ d = lev(km, norm(b)); if(d / km.length <= 0.2) hit = b; } }
+      if(hit && d < singleD){ out.push(w.pre + shape(w.core, hit) + n.post); i++; continue; }
+    }
+    const rep = single;
+    out.push(w.pre + (rep ? shape(w.core, rep) : w.core) + w.post);
+  }
+  return out.join(' ');
+}
+// picks the speech guess that contains the most words from the slides
+function bestAlternative(result, p){
+  if(result.length < 2 || !docVocab.size) return result[0].transcript;
+  const near = new Map([...(vocab[p-1] || []), ...(vocab[p+1] || []), ...(vocab[p] || [])]);
+  let best = result[0].transcript, bs = -1;
+  for(let a = 0; a < result.length; a++){
+    const t = result[a].transcript;
+    const sc = (t.split(/\s+/).filter(w => w.length > 3 && (near.has(norm(w)) || docVocab.has(norm(w)))).length) * 2 - a * 0.5;
+    if(sc > bs){ bs = sc; best = t; }
+  }
+  return best;
+}
+
 /* ---------- notes ---------- */
-function add(text, p = page){
+function add(text, p = page, spoken = false){
   text = (text || '').trim(); if(!text) return;
+  if(spoken) text = fixText(text, p);
   notes().push({p, t: time(), text: text[0].toUpperCase() + text.slice(1)});
   persist(); render();
 }
@@ -382,13 +463,17 @@ function downsample(buf, rate){
 /* ---------- engine 1: browser built-in (Chrome / Edge / Safari) ---------- */
 let sr = null;
 function startLive(){
-  sr = new SR(); sr.continuous = true; sr.interimResults = true; sr.lang = $('lang').value === 'auto' ? (navigator.language || 'en-US') : $('lang').value;
+  sr = new SR(); sr.continuous = true; sr.interimResults = true; sr.maxAlternatives = 5;
+  try {   // newer Chrome: tell the engine which words to expect
+    if('phrases' in sr && window.SpeechRecognitionPhrase && docVocab.size)
+      sr.phrases = [...docVocab.values()].filter(w => w.length > 5).slice(0, 300).map(w => new SpeechRecognitionPhrase(w, 3));
+  } catch(e){} sr.lang = $('lang').value === 'auto' ? (navigator.language || 'en-US') : $('lang').value;
   sr.onstart = () => status('🎙 Listening (browser engine)… speak now', 'ok');
   sr.onresult = e => {
     let interim = '';
     for(let i = e.resultIndex; i < e.results.length; i++){
       const r = e.results[i];
-      if(r.isFinal) add(r[0].transcript); else interim += r[0].transcript;
+      if(r.isFinal) add(bestAlternative(r, page), page, true); else interim += r[0].transcript;
     }
     $('interim').textContent = interim ? '🎙 ' + interim : '';
   };
@@ -423,7 +508,7 @@ function onWorkerMsg(d){
     status('🎙 Listening (Whisper' + (d.device === 'webgpu' ? ', GPU' : '') + ')… notes appear a few seconds after each sentence', 'ok'); next(); }
   else if(d.type === 'text'){ busy = false; $('interim').textContent = '';
     const t = (d.text || '').trim(); const words = t.toLowerCase().split(/\s+/); const junk = words.length > 6 && new Set(words).size / words.length < 0.35;
-    if(t && !BAD.test(t) && !junk) add(t, d.page); else if(on) $('interim').textContent = '(heard sound, but no words)'; next(); }
+    if(t && !BAD.test(t) && !junk) add(t, d.page, true); else if(on) $('interim').textContent = '(heard sound, but no words)'; next(); }
   else if(d.type === 'error'){ busy = false; if(!workerReady) loadingModel = ''; status('❌ Whisper error: ' + d.msg, 'bad'); next(); }
 }
 const canCache = /^https?:$/.test(location.protocol) && 'caches' in window;   // Firefox can't cache for file:// pages
