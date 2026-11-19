@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#2f5bd3">
+<title>Live Notes</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  :root{--bg:#eceae5;--card:#fff;--ink:#1d1d1f;--muted:#6b6b70;--line:#dedbd3;--rec:#d93b3b;--acc:#2f5bd3;--hi:#eef2ff}
+  @media (prefers-color-scheme:dark){:root{--bg:#131315;--card:#1f1f22;--ink:#ececee;--muted:#9a9aa0;--line:#2e2e33;--acc:#7c9cff;--hi:#262b40}}
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--ink);height:100vh;height:100dvh;display:flex;flex-direction:column;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);overflow:hidden;-webkit-tap-highlight-color:transparent}
+  button,select,input{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:5px 10px;cursor:pointer}
+  button:hover{border-color:var(--acc)} button:disabled{opacity:.4;cursor:default}
+  header{display:flex;gap:8px;align-items:center;padding:8px 12px;background:var(--card);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  h1{font-size:15px;margin:0;display:flex;align-items:center;gap:8px}
+  .dot{width:10px;height:10px;border-radius:50%;background:var(--muted)} .dot.on{background:var(--rec);animation:p 1.2s infinite}
+  @keyframes p{50%{opacity:.3}}
+  .sp{flex:1}
+  #rec{background:var(--acc);color:#fff;border-color:var(--acc);font-weight:600} #rec.on{background:var(--rec);border-color:var(--rec)}
+  .meter{width:60px;height:8px;border-radius:4px;background:var(--line);overflow:hidden} .meter i{display:block;height:100%;width:0;background:#2fa84f;transition:width .08s}
+  .wrap{flex:1;display:flex;min-height:0}
+  .viewer{flex:1;display:flex;flex-direction:column;min-width:0}
+  .stage{flex:1;overflow:auto;display:flex;justify-content:center;align-items:flex-start;padding:16px}
+  canvas{box-shadow:0 2px 12px rgba(0,0,0,.15);background:#fff;max-width:100%}
+  .drop{margin:auto;text-align:center;color:var(--muted);border:2px dashed var(--line);border-radius:14px;padding:40px;max-width:420px}
+  .drop.over{border-color:var(--acc);color:var(--acc)}
+  .nav{display:flex;gap:8px;justify-content:center;align-items:center;padding:8px;background:var(--card);border-top:1px solid var(--line)}
+  .nav input{width:56px;text-align:center;cursor:text}
+  aside{width:360px;min-width:260px;display:flex;flex-direction:column;background:var(--bg);border-left:1px solid var(--line);resize:horizontal;overflow:hidden;direction:rtl}
+  aside>*{direction:ltr}
+  .tabs{display:flex;gap:4px;padding:8px;border-bottom:1px solid var(--line)}
+  .tabs button{flex:1;font-size:13px} .tabs button.act{background:var(--acc);color:#fff;border-color:var(--acc)}
+  #list{flex:1;overflow-y:auto;padding:10px}
+  .grp{font-size:12px;font-weight:700;color:var(--muted);margin:10px 2px 4px;cursor:pointer} .grp:hover{color:var(--acc)}
+  .note{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:6px 10px;margin-bottom:6px}
+  .note.cur{background:var(--hi)}
+  .meta{font-size:11px;color:var(--muted);display:flex;justify-content:space-between}
+  .meta button{padding:0 4px;font-size:11px;border:none;background:none;color:var(--muted)}
+  .txt{outline:none;white-space:pre-wrap}
+  .empty{color:var(--muted);text-align:center;margin-top:30px}
+  .interim{color:var(--muted);font-style:italic;padding:0 12px;min-height:20px;font-size:13px}
+  .foot{padding:8px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:6px;background:var(--card)}
+  .foot input{cursor:text;width:100%} .row{display:flex;gap:6px} .row button{flex:1}
+  #warn{padding:6px 12px;font-size:13px;display:none}
+  .opts{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted)}
+  .opts select{font-size:12px;padding:3px 6px}
+  #gear{display:none}
+  .stage{touch-action:pan-x pan-y pinch-zoom}
+  /* ---------- phones ---------- */
+  @media (max-width:760px){
+    header{padding:6px 8px;gap:6px}
+    h1 .t,#fname,.meter{display:none}
+    #gear{display:inline-block}
+    .opts{display:none;width:100%;order:9;flex-wrap:wrap}
+    .opts.show{display:flex}
+    .opts select,#lang{flex:1;font-size:14px;padding:6px}
+    #lang{display:none} .opts.show ~ #lang{display:block;order:10;width:100%}
+    button{padding:8px 12px}
+    #rec{padding:8px 16px}
+    .wrap{flex-direction:column}
+    .viewer{flex:0 0 50%;min-height:0}
+    .stage{padding:8px}
+    .nav{padding:6px;gap:6px}
+    aside{width:100%;min-width:0;flex:1;min-height:0;border-left:none;border-top:2px solid var(--line);resize:none}
+    .tabs{padding:6px}
+    input,select,.txt{font-size:16px} /* stops iPhone auto-zoom */
+    .zoom{display:none}
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="dot" id="dot"></span><span class="t">Live Notes</span></h1>
+  <button id="open">📂 Open PDF</button>
+  <button id="gear" title="Settings">⚙︎</button>
+  <input type="file" id="file" accept="application/pdf" hidden>
+  <span id="fname" style="color:var(--muted);font-size:13px"></span>
+  <span class="sp"></span>
+  <span class="opts">
+    <select id="engine" title="Speech-to-text engine">
+      <option value="auto">Engine: Auto</option>
+      <option value="live">Browser (live, Chrome/Edge/Safari)</option>
+      <option value="whisper">Whisper (any browser)</option>
+    </select>
+    <select id="model" title="Whisper model size">
+      <option value="onnx-community/whisper-tiny">Tiny · fastest</option>
+      <option value="onnx-community/whisper-base" selected>Base · balanced</option>
+      <option value="onnx-community/whisper-small">Small · best, slow</option>
+    </select>
+  </span>
+  <select id="lang" title="Spoken language">
+    <option value="auto" data-w="auto">Auto-detect (Whisper)</option><option value="en-US" data-w="english" selected>English</option><option value="tr-TR" data-w="turkish">Türkçe</option>
+    <option value="en-GB" data-w="english">English (UK)</option><option value="de-DE" data-w="german">Deutsch</option>
+    <option value="fr-FR" data-w="french">Français</option><option value="es-ES" data-w="spanish">Español</option>
+    <option value="ar-SA" data-w="arabic">العربية</option>
+  </select>
+  <span class="meter" title="Mic level"><i id="lvl"></i></span>
+  <button id="rec">● Record</button>
+</header>
+<div id="warn"></div>
+
+<div class="wrap">
+  <section class="viewer">
+    <div class="stage" id="stage">
+      <div class="drop" id="drop">
+        <div style="font-size:34px">📄</div>
+        <b>Drop your PDF here</b> or tap <b>📂 Open PDF</b><br><br>
+        <small>For PowerPoint or Word: first do <b>File → Save As → PDF</b>, then open that.</small>
+      </div>
+      <canvas id="cv" hidden></canvas>
+    </div>
+    <div class="nav">
+      <button id="prev">◀ Prev</button>
+      <span>Page <input id="pg" value="1"> / <span id="total">–</span></span>
+      <button id="next">Next ▶</button>
+      <button id="zo" class="zoom" title="Zoom out">−</button><button id="zi" class="zoom" title="Zoom in">+</button>
+    </div>
+  </section>
+
+  <aside>
+    <div class="tabs"><button id="tPage" class="act">This page</button><button id="tAll">All notes</button></div>
+    <div id="list"></div>
+    <div class="interim" id="interim"></div>
+    <div class="foot">
+      <input id="typed" placeholder="Type a note for this page & press Enter…">
+      <div class="row"><button id="share" hidden>Share</button><button id="copy">Copy</button><button id="save">Save .txt</button><button id="clear">Clear</button></div>
+    </div>
+  </aside>
+</div>
+
+<!-- Whisper worker code (runs speech-to-text inside the browser) -->
+<script type="text/plain" id="workerSrc">
+const CDN = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.1';
+const send = m => (globalThis.__lnSend || postMessage)(m);
+let T = null, asr = null, cur = '';
+async function make(model, device) {
+  return T.pipeline('automatic-speech-recognition', model, {
+    device,
+    dtype: device === 'webgpu' ? { encoder_model: 'fp32', decoder_model_merged: 'q4' } : 'q8',
+    progress_callback: p => {
+      if (p.status === 'progress') send({ type: 'progress', pct: p.total ? p.loaded / p.total * 100 : null, mb: (p.loaded || 0) / 1048576, file: p.file });
+      else if (p.status === 'initiate') send({ type: 'progress', pct: 0, mb: 0, file: p.file });
+    }
+  });
+}
+async function handle(d) {
+  if (d.type === 'load') {
+    send({ type: 'alive' });
+    try {
+      if (!T) { send({ type: 'stage', msg: 'Loading speech engine library…' }); T = await import(CDN); }
+      T.env.allowLocalModels = false;
+      T.env.useBrowserCache = !!d.cache;
+    } catch (e) { return send({ type: 'error', msg: 'Could not download the Whisper library (' + (e.message || e) + ')' }); }
+    if (asr && cur === d.model) return send({ type: 'ready', device: 'cached' });
+    let device = 'wasm';
+    try { if (navigator.gpu && await navigator.gpu.requestAdapter()) device = 'webgpu'; } catch (e) {}
+    send({ type: 'stage', msg: 'Starting model download…' });
+    try { asr = await make(d.model, device); }
+    catch (e) {
+      if (device === 'webgpu') { try { device = 'wasm'; asr = await make(d.model, device); } catch (e2) { return send({ type: 'error', msg: String(e2.message || e2) }); } }
+      else return send({ type: 'error', msg: String(e.message || e) });
+    }
+    cur = d.model; send({ type: 'ready', device });
+  } else if (d.type === 'run') {
+    try {
+      const opts = { task: 'transcribe', no_repeat_ngram_size: 3 }; if (d.lang) opts.language = d.lang;
+      const out = await asr(d.audio, opts);
+      send({ type: 'text', text: out.text, page: d.page });
+    } catch (e) { send({ type: 'error', msg: String(e.message || e) }); }
+  }
+}
+globalThis.__lnHandle = handle;
+if (typeof WorkerGlobalScope !== 'undefined') self.onmessage = e => handle(e.data);
+</script>
+
+<script>
+const $ = id => document.getElementById(id);
+if(window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+/* ---------- state ---------- */
+let pdf = null, page = 1, zoom = 1, docName = 'notes', view = 'page', rendering = null;
+let store = {};
+try { store = JSON.parse(localStorage.getItem('live-notes-v2')) || {}; } catch(e) {}
+const notes = () => (store[docName] ||= []);
+const persist = () => { try { localStorage.setItem('live-notes-v2', JSON.stringify(store)); } catch(e) {} };
+const time = () => new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+try { const s = JSON.parse(localStorage.getItem('live-notes-opts')); if(s){ $('engine').value = s.engine; $('model').value = s.model; $('lang').value = s.lang; } } catch(e) {}
+const saveOpts = () => { try { localStorage.setItem('live-notes-opts', JSON.stringify({engine: $('engine').value, model: $('model').value, lang: $('lang').value})); } catch(e) {} };
+['engine','model','lang'].forEach(id => $(id).addEventListener('change', saveOpts));
+
+function status(t, kind){ const w = $('warn'); w.innerHTML = t; w.style.display = t ? 'block' : 'none';
+  const c = {bad:['#fde2e2','#7a1010'], ok:['#e3f6e8','#0f5132'], info:['#e7eefc','#1c3b8a']}[kind || 'info'];
+  w.style.background = c[0]; w.style.color = c[1]; }
+
+/* ---------- PDF viewer ---------- */
+async function loadFile(f){
+  if(!window.pdfjsLib){ alert('Could not load the PDF viewer. Check your internet connection and reload.'); return; }
+  if(!f || f.type !== 'application/pdf'){ alert('Please choose a PDF file.\nFor PowerPoint/Word: File → Save As → PDF.'); return; }
+  docName = f.name; $('fname').textContent = f.name;
+  pdf = await pdfjsLib.getDocument({data: await f.arrayBuffer()}).promise;
+  $('total').textContent = pdf.numPages;
+  $('drop').hidden = true; $('cv').hidden = false;
+  go(1);
+}
+async function draw(){
+  if(!pdf) return;
+  const p = await pdf.getPage(page), dpr = window.devicePixelRatio || 1;
+  const base = p.getViewport({scale: 1}), st = $('stage');
+  const fit = Math.min((st.clientWidth - 24) / base.width, (st.clientHeight - 24) / base.height) || 1;
+  const vp = p.getViewport({scale: fit * zoom * dpr});
+  const cv = $('cv');
+  cv.width = vp.width; cv.height = vp.height; cv.style.width = vp.width / dpr + 'px';
+  if(rendering) rendering.cancel();
+  rendering = p.render({canvasContext: cv.getContext('2d'), viewport: vp});
+  try { await rendering.promise; } catch(e) {}
+}
+function go(n){
+  if(!pdf) return;
+  page = Math.min(Math.max(1, n), pdf.numPages);
+  $('pg').value = page;
+  $('prev').disabled = page <= 1; $('next').disabled = page >= pdf.numPages;
+  draw(); render();
+}
+$('open').onclick = () => $('file').click();
+$('file').onchange = e => loadFile(e.target.files[0]);
+$('prev').onclick = () => go(page - 1);
+$('next').onclick = () => go(page + 1);
+$('pg').onchange = () => go(parseInt($('pg').value) || 1);
+$('zi').onclick = () => { zoom = Math.min(zoom + .25, 4); draw(); };
+let rz; window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(draw, 150); });
+$('zo').onclick = () => { zoom = Math.max(zoom - .25, .5); draw(); };
+document.addEventListener('keydown', e => {
+  if(e.target.isContentEditable || ['INPUT','SELECT'].includes(e.target.tagName)) return;
+  if(['ArrowRight','ArrowDown','PageDown',' '].includes(e.key)){ e.preventDefault(); go(page + 1); }
+  if(['ArrowLeft','ArrowUp','PageUp'].includes(e.key)){ e.preventDefault(); go(page - 1); }
+});
+const stage = $('stage');
+let tx0 = null, ty0 = 0;
+stage.addEventListener('touchstart', e => { if(e.touches.length === 1){ tx0 = e.touches[0].clientX; ty0 = e.touches[0].clientY; } else tx0 = null; }, {passive: true});
+stage.addEventListener('touchend', e => {
+  if(tx0 === null || (window.visualViewport && visualViewport.scale > 1.05)) return;
+  const dx = e.changedTouches[0].clientX - tx0, dy = e.changedTouches[0].clientY - ty0; tx0 = null;
+  if(Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) go(page + (dx < 0 ? 1 : -1));   // swipe to turn page
+}, {passive: true});
+$('gear').onclick = () => $('gear').parentElement.querySelector('.opts').classList.toggle('show');
+stage.ondragover = e => { e.preventDefault(); $('drop').classList.add('over'); };
+stage.ondragleave = () => $('drop').classList.remove('over');
+stage.ondrop = e => { e.preventDefault(); $('drop').classList.remove('over'); loadFile(e.dataTransfer.files[0]); };
+
+/* ---------- notes ---------- */
+function add(text, p = page){
+  text = (text || '').trim(); if(!text) return;
+  notes().push({p, t: time(), text: text[0].toUpperCase() + text.slice(1)});
+  persist(); render();
+}
+function render(){
+  const list = $('list'); list.innerHTML = '';
+  const all = notes().map((n,i) => ({...n, i}));
+  const shown = view === 'page' ? all.filter(n => n.p === page) : [...all].sort((a,b) => a.p - b.p || a.i - b.i);
+  if(!shown.length){
+    list.innerHTML = `<div class="empty">${view === 'page' ? 'No notes for page ' + page + ' yet.<br>Press <b>Record</b> or type below.' : 'No notes yet.'}</div>`;
+    return;
+  }
+  let last = null;
+  shown.forEach(n => {
+    if(view === 'all' && n.p !== last){
+      const g = document.createElement('div'); g.className = 'grp'; g.textContent = 'Page ' + n.p + ' →';
+      g.onclick = () => go(n.p); list.appendChild(g); last = n.p;
+    }
+    const d = document.createElement('div');
+    d.className = 'note' + (n.p === page ? ' cur' : '');
+    d.innerHTML = `<div class="meta"><span>p.${n.p} · ${n.t}</span><button title="Delete">✕</button></div><div class="txt" contenteditable="true"></div>`;
+    const tx = d.querySelector('.txt'); tx.textContent = n.text;
+    tx.oninput = () => { notes()[n.i].text = tx.textContent; persist(); };
+    d.querySelector('button').onclick = () => { notes().splice(n.i, 1); persist(); render(); };
+    list.appendChild(d);
+  });
+  if(view === 'page') list.scrollTop = list.scrollHeight;
+}
+$('tPage').onclick = () => { view = 'page'; $('tPage').classList.add('act'); $('tAll').classList.remove('act'); render(); };
+$('tAll').onclick  = () => { view = 'all';  $('tAll').classList.add('act'); $('tPage').classList.remove('act'); render(); };
+$('typed').onkeydown = e => { if(e.key === 'Enter'){ add($('typed').value); $('typed').value = ''; } };
+const allText = () => {
+  let out = docName + '\n' + '='.repeat(docName.length) + '\n', last = null;
+  [...notes()].sort((a,b) => a.p - b.p).forEach(n => {
+    if(n.p !== last){ out += `\n--- Page ${n.p} ---\n`; last = n.p; }
+    out += `• ${n.text}\n`;
+  });
+  return out;
+};
+$('copy').onclick = async () => { try { await navigator.clipboard.writeText(allText()); $('copy').textContent = 'Copied!'; setTimeout(() => $('copy').textContent = 'Copy', 1200); } catch(e){ alert('Copy failed'); } };
+$('save').onclick = () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([allText()], {type: 'text/plain'}));
+  a.download = docName.replace(/\.pdf$/i, '') + ' - notes.txt'; document.body.appendChild(a); a.click(); a.remove();
+};
+if(navigator.share){ $('share').hidden = false;
+  $('share').onclick = async () => { try { await navigator.share({title: docName + ' notes', text: allText()}); } catch(e){} }; }
+$('clear').onclick = () => { if(confirm('Delete all notes for this file?')){ store[docName] = []; persist(); render(); } };
+
+/* ---------- which engine? ---------- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const ua = navigator.userAgent;
+const isIOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isMobile = isIOS || /Android|Mobi/.test(ua);
+const nativeWorks = !!SR && !navigator.brave && (isIOS || !/OPR\/|Opera|Firefox/.test(ua));
+try { if(isMobile && !localStorage.getItem('live-notes-opts')) $('model').value = 'onnx-community/whisper-tiny'; } catch(e){}
+const pickEngine = () => { const e = $('engine').value; return e === 'auto' ? (nativeWorks ? 'live' : 'whisper') : e; };
+let on = false, engineNow = null;
+function setUI(rec){ $('rec').textContent = rec ? '■ Stop' : '● Record'; $('rec').classList.toggle('on', rec); $('dot').classList.toggle('on', rec); }
+
+async function start(){
+  if(location.protocol === 'about:' || window.top !== window.self){
+    status('❌ This preview can\'t use the microphone. Download the file, then open it in your browser.', 'bad'); return;
+  }
+  if(!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    status('❌ The microphone only works when this page is opened from an <b>https://</b> link (or as a file on a computer). On a phone, open it from its web link.', 'bad'); return; }
+  const AC = window.AudioContext || window.webkitAudioContext;
+  try { actx = new AC(); actx.resume(); } catch(e){}          // must happen right in the tap on iPhone
+  engineNow = pickEngine();
+  if(engineNow === 'live' && !SR){ status('Browser speech isn\'t available here — switching to Whisper.', 'info'); engineNow = 'whisper'; }
+  on = true; setUI(true);
+  keepAwake();
+  try { await startMic(); if(isIOS && engineNow === 'live') stopMic(); }   // iPhone: let Safari's own speech engine own the mic
+  catch(err){ on = false; setUI(false); status('❌ Microphone blocked or missing (' + err.name + '). Allow the microphone for this page (icon in the address bar) and reload.', 'bad'); return; }
+  if(engineNow === 'live') startLive(); else startWhisper();
+}
+function stop(keepMsg){
+  on = false; setUI(false); $('interim').textContent = '';
+  if(sr) try { sr.abort(); } catch(e){}
+  flushChunk(true);
+  stopMic();
+  if(wake) try { wake.release(); } catch(e){} wake = null;
+  if(!keepMsg) status('');
+}
+$('rec').onclick = () => on ? stop() : start();
+$('lang').onchange = () => { if(on){ stop(); setTimeout(start, 300); } };
+$('engine').onchange = () => { if(on){ stop(); setTimeout(start, 300); } };
+
+let wake = null;
+async function keepAwake(){ try { wake = await navigator.wakeLock.request('screen'); } catch(e){} }   // stop the phone screen sleeping
+document.addEventListener('visibilitychange', () => { if(on && document.visibilityState === 'visible') keepAwake(); });
+
+/* ---------- microphone + level meter (+ audio for Whisper) ---------- */
+let stream = null, actx = null, proc = null;
+async function startMic(){
+  stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: false, noiseSuppression: false, autoGainControl: true, channelCount: 1}});
+  if(!actx || actx.state === 'closed'){ const AC = window.AudioContext || window.webkitAudioContext; actx = new AC(); }
+  await actx.resume();
+  const src = actx.createMediaStreamSource(stream);
+  proc = actx.createScriptProcessor(4096, 1, 1);
+  src.connect(proc); proc.connect(actx.destination);
+  proc.onaudioprocess = e => {
+    const inp = e.inputBuffer.getChannelData(0);
+    let s = 0; for(let i = 0; i < inp.length; i++) s += inp[i] * inp[i];
+    const rms = Math.sqrt(s / inp.length);
+    $('lvl').style.width = Math.min(100, Math.sqrt(rms) * 250) + '%';
+    if(on && engineNow === 'whisper') onFrame(downsample(inp, actx.sampleRate), rms);
+  };
+}
+function stopMic(){
+  try { proc && (proc.onaudioprocess = null, proc.disconnect()); } catch(e){}
+  try { stream && stream.getTracks().forEach(t => t.stop()); } catch(e){}
+  try { actx && actx.close(); } catch(e){}
+  stream = actx = proc = null; $('lvl').style.width = '0';
+}
+function downsample(buf, rate){
+  if(rate === 16000) return new Float32Array(buf);
+  const ratio = rate / 16000, n = Math.floor(buf.length / ratio), out = new Float32Array(n);
+  for(let i = 0; i < n; i++){
+    const a = Math.floor(i * ratio), b = Math.min(buf.length, Math.floor((i + 1) * ratio));
+    let sum = 0; for(let j = a; j < b; j++) sum += buf[j];
+    out[i] = sum / Math.max(1, b - a);
+  }
+  return out;
+}
+
+/* ---------- engine 1: browser built-in (Chrome / Edge / Safari) ---------- */
+let sr = null;
+function startLive(){
+  sr = new SR(); sr.continuous = true; sr.interimResults = true; sr.lang = $('lang').value === 'auto' ? (navigator.language || 'en-US') : $('lang').value;
+  sr.onstart = () => status('🎙 Listening (browser engine)… speak now', 'ok');
+  sr.onresult = e => {
+    let interim = '';
+    for(let i = e.resultIndex; i < e.results.length; i++){
+      const r = e.results[i];
+      if(r.isFinal) add(r[0].transcript); else interim += r[0].transcript;
+    }
+    $('interim').textContent = interim ? '🎙 ' + interim : '';
+  };
+  sr.onerror = e => {
+    if(['network','service-not-allowed','language-not-supported'].includes(e.error) && $('engine').value === 'auto'){
+      status('Browser speech engine failed (' + e.error + ') — switching to Whisper…', 'info');
+      try { sr.abort(); } catch(_){} sr = null; engineNow = 'whisper'; startWhisper(); return;
+    }
+    const msg = {
+      'not-allowed': '❌ Microphone blocked. Allow the microphone for this page and reload.',
+      'service-not-allowed': '❌ Browser speech service unavailable. Set Engine to <b>Whisper</b>.',
+      'audio-capture': '❌ No microphone found. Check it\'s plugged in and selected in your system sound settings.',
+      'network': '❌ Browser speech needs internet. Or set Engine to <b>Whisper</b>.',
+      'language-not-supported': '❌ Language not supported by the browser engine. Try Whisper.'
+    }[e.error];
+    if(msg){ status(msg, 'bad'); stop(true); }
+  };
+  sr.onend = () => { if(on && engineNow === 'live') setTimeout(() => { if(on && sr) try { sr.start(); } catch(e){} }, 250); };
+  try { sr.start(); } catch(e){}
+}
+
+/* ---------- engine 2: Whisper in the browser (works in Firefox, Opera, all) ---------- */
+let worker = null, workerReady = false, loadedModel = '', busy = false, queue = [];
+let chunk = [], chunkLen = 0, hasSpeech = false, silentMs = 0, chunkPage = null, noise = 0.002, peakSeen = 0;
+const BAD = /^(\s*[\[\(].*[\]\)]\s*|\s*(thank you\.?|thanks for watching!?|you|altyazı m\.?k\.?|abone olmayı unutmayın\.?|\.+)\s*)$/i;
+
+function onWorkerMsg(d){
+  if(d.type === 'progress') status(`⬇️ Downloading Whisper model (first time only)… ${d.pct != null ? Math.round(d.pct) + '%' : d.mb.toFixed(1) + ' MB'} <small>(${(d.file || '').split('/').pop()})</small>`, 'info');
+  else if(d.type === 'stage') status('⏳ ' + d.msg, 'info');
+  else if(d.type === 'alive'){}
+  else if(d.type === 'ready'){ workerReady = true; clearTimeout(loadTimer); loadedModel = $('model').value;
+    status('🎙 Listening (Whisper' + (d.device === 'webgpu' ? ', GPU' : '') + ')… notes appear a few seconds after each sentence', 'ok'); next(); }
+  else if(d.type === 'text'){ busy = false; $('interim').textContent = '';
+    const t = (d.text || '').trim(); const words = t.toLowerCase().split(/\s+/); const junk = words.length > 6 && new Set(words).size / words.length < 0.35;
+    if(t && !BAD.test(t) && !junk) add(t, d.page); else if(on) $('interim').textContent = '(heard sound, but no words)'; next(); }
+  else if(d.type === 'error'){ busy = false; if(!workerReady) loadingModel = ''; status('❌ Whisper error: ' + d.msg, 'bad'); next(); }
+}
+const canCache = /^https?:$/.test(location.protocol) && 'caches' in window;   // Firefox can't cache for file:// pages
+let aliveTimer = null, usingMain = false;
+async function ensureWorker(){
+  if(worker) return;
+  const code = $('workerSrc').textContent;
+  try {
+    const w = new Worker(URL.createObjectURL(new Blob([code], {type: 'text/javascript'})), {type: 'module'});
+    w.onmessage = e => { if(e.data.type === 'alive') clearTimeout(aliveTimer); onWorkerMsg(e.data); };
+    w.onerror = ev => { ev.preventDefault && ev.preventDefault(); if(worker === w) switchToMain(); };
+    worker = w;
+  } catch(e){ switchToMain(); }
+}
+function switchToMain(){            // background worker blocked (e.g. Firefox + file://) → run Whisper on the page itself
+  if(usingMain) return; usingMain = true;
+  clearTimeout(aliveTimer);
+  try { worker && worker.terminate && worker.terminate(); } catch(e){}
+  globalThis.__lnSend = d => onWorkerMsg(d);
+  try { new Function($('workerSrc').textContent)(); }
+  catch(e){ status('❌ Couldn\'t start Whisper (' + (e.message || e) + ').', 'bad'); stop(true); return; }
+  worker = { postMessage: d => globalThis.__lnHandle(d) };
+  loadingModel = ''; loadModel();
+}
+let loadTimer = null;
+async function startWhisper(){
+  status('Loading Whisper… (needs internet the first time)', 'info');
+  clearTimeout(loadTimer);
+  loadTimer = setTimeout(() => { if(on && !workerReady) status('⚠️ Whisper is taking long to load. Check your internet, try the <b>Tiny</b> model, or reload the page.', 'bad'); }, 45000);
+  await ensureWorker();
+  if(!workerReady || loadedModel !== $('model').value) loadModel();
+  else status('🎙 Listening (Whisper)… notes appear a few seconds after each sentence', 'ok');
+}
+let loadingModel = '';
+function loadModel(){ const m = $('model').value; if(loadingModel === m || !worker) return; loadingModel = m; workerReady = false;
+  if(!usingMain){ clearTimeout(aliveTimer); aliveTimer = setTimeout(switchToMain, 5000); }   // worker silent → fall back
+  worker.postMessage({type: 'load', model: m, cache: canCache}); }
+$('model').addEventListener('change', () => { workerReady = false; if(on && engineNow === 'whisper') loadModel(); });
+
+function onFrame(f, rms){
+  const ms = f.length / 16;
+  const speech = rms > Math.max(0.0025, noise * 2.5);          // adapts to quiet mics / far-away speakers
+  if(!speech) noise = Math.min(0.05, noise * 0.97 + rms * 0.03);
+  peakSeen = Math.max(peakSeen * 0.999, rms);
+  if(speech){ if(!hasSpeech){ chunkPage = page; if(!busy) $('interim').textContent = '👂 hearing speech…'; } hasSpeech = true; silentMs = 0; } else silentMs += ms;
+  chunk.push(f); chunkLen += f.length;
+  if(!hasSpeech){ while(chunkLen > 8000){ chunkLen -= chunk.shift().length; } return; }   // keep 0.5 s pre-roll
+  const dur = chunkLen / 16000;
+  if((silentMs > 900 && dur > 4) || (silentMs > 1500 && dur > 1.5) || dur > 20) flushChunk();
+}
+function flushChunk(force){
+  if(hasSpeech && chunkLen > 8000){
+    const audio = new Float32Array(chunkLen); let o = 0;
+    for(const c of chunk){ audio.set(c, o); o += c.length; }
+    let peak = 0; for(let i = 0; i < audio.length; i++) peak = Math.max(peak, Math.abs(audio[i]));
+    if(peak > 0.001 && peak < 0.5){ const g = Math.min(20, 0.7 / peak); for(let i = 0; i < audio.length; i++) audio[i] *= g; }   // boost quiet audio
+    const w = $('lang').selectedOptions[0].dataset.w;
+    queue.push({type: 'run', audio, lang: w === 'auto' ? null : w, page: chunkPage ?? page});
+    if(queue.length > 6) queue.shift();
+    next();
+  }
+  chunk = []; chunkLen = 0; hasSpeech = false; silentMs = 0; chunkPage = null;
+}
+function next(){
+  if(busy || !workerReady || !queue.length || !worker) return;
+  busy = true; $('interim').textContent = '⏳ writing…';
+  worker.postMessage(queue.shift());
+}
+
+if(!canCache && location.protocol === 'file:' && !nativeWorks) status('ℹ️ Opened as a file: Whisper works, but Firefox will re-download the model each time. Use the https link to download it only once.', 'info');
+else if(!nativeWorks) status('ℹ️ This browser will use <b>Whisper</b>: speech-to-text runs on your computer. The first time, it downloads a model (~80 MB).', 'info');
+render();
+</script>
+</body>
+</html>
